@@ -7,15 +7,14 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest']
 
-  # 3. Deploy automático no Cloud Run
+  # 3. Deploy como Cloud Run Job
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       [
-        'run', 'deploy', 'data-etl',
+        'run', 'jobs', 'deploy', 'data-etl-job',
         '--image', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest',
         '--region', '$_REGION',
-        '--platform', 'managed',
-        '--allow-unauthenticated'
+        '--max-retries', '0'
       ]
 
 images:
