@@ -1,13 +1,10 @@
 steps:
-  # 1. Build da imagem Docker
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest', '.']
 
-  # 2. Push da imagem para o Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest']
 
-  # 3. Deploy como Cloud Run Job
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       [
