@@ -11,7 +11,9 @@ steps:
         'run', 'jobs', 'deploy', 'data-etl-job',
         '--image', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest',
         '--region', '$_REGION',
-        '--max-retries', '0'
+        '--max-retries', '0',
+        '--command=python',
+        '--args=src/main.py'
       ]
 
 images:
@@ -19,3 +21,4 @@ images:
 
 substitutions:
   _REGION: 'southamerica-east1'
+

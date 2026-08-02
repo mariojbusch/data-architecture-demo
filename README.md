@@ -1,6 +1,6 @@
 # Data Architecture Demo
 
-Este repositório demonstra uma arquitetura de dados moderna, escalável e de baixo custo construída na Google Cloud Platform (GCP), utilizando Python, Terraform, Cloud Run, Cloud Build e boas práticas de engenharia de dados. O projeto foi desenvolvido com apoio do Copilot, que acelerou decisões técnicas, geração de código, documentação e estruturação da arquitetura.
+Este repositório demonstra uma arquitetura de dados moderna, escalável e de baixo custo construída na Google Cloud Platform (GCP), utilizando Python, Cloud Run Jobs, Cloud Scheduler, Cloud Build, BigQuery, Terraform e boas práticas de engenharia de dados. O projeto foi desenvolvido com apoio do Copilot, que acelerou decisões técnicas, geração de código, documentação e estruturação da arquitetura.
 
 ---
 
@@ -10,11 +10,11 @@ Criar uma arquitetura de dados completa, simples de replicar e ideal para demons
 
 - Data Lake (Cloud Storage)
 - Data Warehouse (BigQuery)
-- ETL em Python
-- Deploy serverless (Cloud Run)
+- ETL serverless (Cloud Run Jobs)
+- Agendamento automático (Cloud Scheduler)
 - CI/CD (Cloud Build)
 - Infraestrutura como código (Terraform)
-- Documentação e diagrama da arquitetura
+- Documentação visual completa
 
 ---
 
@@ -22,33 +22,45 @@ Criar uma arquitetura de dados completa, simples de replicar e ideal para demons
 
 A arquitetura segue o padrão Medallion:
 
-- Raw → dados brutos
-- Staged → dados limpos e padronizados
-- Curated → dados prontos para consumo analítico
+- **Raw** → dados brutos
+- **Staged** → dados limpos e padronizados
+- **Curated** → dados prontos para consumo analítico
 
 ### Componentes principais
 
 - **Cloud Storage** — Buckets organizados por camadas (raw, staged, curated).
-- **BigQuery** — Dataset `data_architecture_demo` para armazenamento analítico.
-- **Cloud Run** — Serviço serverless que executa pipelines ETL escritos em Python.
-- **Cloud Build** — Pipeline CI/CD que constrói a imagem Docker e faz deploy automático.
+- **Cloud Run Jobs** — Execução serverless do pipeline ETL.
+- **Cloud Scheduler** — Disparo automático do job.
+- **BigQuery** — Dataset analítico.
+- **Cloud Build** — Pipeline CI/CD que constrói a imagem Docker.
 - **Terraform** — Provisionamento de buckets, dataset e demais recursos.
+- **IAM / Service Accounts** — Controle de acesso e autenticação.
+- **Cloud Logging & Monitoring** — Observabilidade completa.
 
 ---
 
 ## 📐 Diagrama da Arquitetura
 
+O diagrama completo da arquitetura está disponível em `docs/architecture-diagram.png`.
+
 ```mermaid
 flowchart TD
-    A[Bucket RAW] --> B[Bucket STAGED]
-    B --> C[Bucket CURATED]
-    C --> D[BigQuery Dataset]
+    API[API Externa] --> ING[Ingestion]
+    ING --> TR[Transform]
+    TR --> LOAD[Load]
 
-    A --> E[Cloud Run ETL]
-    E --> D
+    LOAD --> RAW[Bucket RAW]
+    RAW --> STAGED[Bucket STAGED]
+    STAGED --> CURATED[Bucket CURATED]
+    CURATED --> BQ[BigQuery Dataset]
 
-    F[GitHub Repo] --> G[Cloud Build CI/CD]
-    G --> E
+    SCHED[Cloud Scheduler] --> CRJ[Cloud Run Job]
+    CRJ --> ING
+
+    GITHUB[GitHub Repo] --> CB[Cloud Build]
+    CB --> CRJ
+
+    LOG[Cloud Logging] --> MON[Cloud Monitoring]
 ```
 
 ---
@@ -64,13 +76,14 @@ data-architecture-demo/
 │
 ├── src/
 │   ├── ingestion/          # Pipelines de ingestão
-│   ├── transformation/     # Transformações
-│   └── load/               # Carga para BigQuery
+│   ├── transform/          # Transformações
+│   └── load/               # Carga para GCS e BigQuery
 │
 ├── notebooks/              # Exploração e protótipos
 │
 ├── docs/
 │   ├── architecture.md     # Documentação detalhada
+│   ├── architecture-diagram.png
 │   ├── diagram.mmd         # Diagrama Mermaid
 │   └── decisions.md        # ADRs (Architecture Decision Records)
 │
@@ -83,37 +96,80 @@ data-architecture-demo/
 
 ---
 
-## 🚀 Deploy e Execução
+## 🚀 Execução Local
 
-### 1. Autenticação no GCP
+### 1. Criar ambiente virtual
 
 ```bash
-gcloud auth login
+/opt/homebrew/opt/python@3.14/bin/python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Autenticação no GCP
+
+```bash
+gcloud auth application-default login
 gcloud config set project data-architecture-demo-001
 ```
 
-### 2. Provisionar infraestrutura com Terraform
+### 3. Executar o ETL
 
 ```bash
-cd infra/terraform
-terraform init
-terraform apply
+python src/main.py
 ```
 
-### 3. Construir e enviar imagem Docker
+---
+
+## 🚀 Deploy em Produção
+
+### 1. Construir imagem Docker
 
 ```bash
 gcloud builds submit --tag gcr.io/$PROJECT_ID/data-etl
 ```
 
-### 4. Deploy no Cloud Run
+### 2. Criar Cloud Run Job
 
 ```bash
-gcloud run deploy data-etl \
+gcloud run jobs create etl-job \
   --image gcr.io/$PROJECT_ID/data-etl \
   --region southamerica-east1 \
-  --platform managed
+  --service-account 26366089084-compute@developer.gserviceaccount.com
 ```
+
+### 3. Executar manualmente
+
+```bash
+gcloud run jobs execute etl-job --region southamerica-east1
+```
+
+### 4. Agendar execução diária
+
+```bash
+gcloud scheduler jobs create http etl-job-schedule \
+  --schedule="0 3 * * *" \
+  --uri="https://southamerica-east1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/etl-job:run" \
+  --http-method=POST \
+  --oauth-service-account-email=26366089084-compute@developer.gserviceaccount.com
+```
+
+---
+
+## 📊 Monitoramento
+
+- Logs disponíveis no **Cloud Logging**
+- Métricas no **Cloud Monitoring**
+- Alertas configuráveis via políticas de monitoramento
+
+---
+
+## 🔐 Segurança e Governança
+
+- Versionamento de objetos habilitado nos buckets
+- Soft delete com retenção de 7 dias
+- IAM granular via Service Accounts
+- Auditoria via Cloud Audit Logs
 
 ---
 
@@ -127,34 +183,32 @@ pytest tests/
 
 ## 🤖 Como o Copilot ajudou neste projeto
 
-Este projeto foi desenvolvido com apoio contínuo do Copilot, que contribuiu em:
+O Copilot contribuiu em:
 
-### 1. Arquitetura
-- Sugestão da estrutura Medallion (raw → staged → curated)
+### Arquitetura
+- Estrutura Medallion
 - Organização dos componentes GCP
-- Criação do diagrama Mermaid
+- Criação do diagrama visual
 
-### 2. Infraestrutura
+### Infraestrutura
 - Geração dos arquivos Terraform
 - Configuração de permissões IAM
-- Criação do pipeline Cloud Build
+- Pipeline Cloud Build
 
-### 3. Código
-- Criação dos módulos de ingestão, transformação e carga
-- Sugestões de boas práticas em Python
-- Estruturação dos testes unitários
+### Código
+- Módulos de ingestão, transformação e carga
+- Boas práticas em Python
+- Testes unitários
 
-### 4. Documentação
+### Documentação
 - Estrutura completa do README
-- Criação de ADRs
-- Explicação da arquitetura e fluxos
+- ADRs
+- Documentação visual
 
-### 5. GitHub
+### GitHub
 - Estrutura profissional do repositório
 - Organização das pastas
-- Orientação para commits e push
-
-O Copilot atuou como um assistente técnico, acelerando decisões, reduzindo erros e garantindo consistência entre os componentes da arquitetura.
+- Orientação para commits
 
 ---
 
