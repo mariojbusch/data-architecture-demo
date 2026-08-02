@@ -1,0 +1,25 @@
+steps:
+  # 1. Build da imagem Docker
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest', '.']
+
+  # 2. Push da imagem para o Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest']
+
+  # 3. Deploy automático no Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      [
+        'run', 'deploy', 'data-etl',
+        '--image', '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest',
+        '--region', '$_REGION',
+        '--platform', 'managed',
+        '--allow-unauthenticated'
+      ]
+
+images:
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/data-architecture-demo/data-etl:latest'
+
+substitutions:
+  _REGION: 'southamerica-east1'
