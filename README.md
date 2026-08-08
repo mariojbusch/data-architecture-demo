@@ -1,47 +1,42 @@
 # Data Architecture Demo
 
-Este repositório demonstra uma arquitetura de dados moderna, escalável e de baixo custo construída na Google Cloud Platform (GCP), utilizando Python, Cloud Run Jobs, Cloud Scheduler, Cloud Build, BigQuery, Terraform e boas práticas de engenharia de dados. O projeto foi desenvolvido com apoio do Copilot, que acelerou decisões técnicas, geração de código, documentação e estruturação da arquitetura.
+Este repositório demonstra uma arquitetura de dados moderna, escalável e de baixo custo construída na Google Cloud Platform (GCP), utilizando Python, Cloud Run Jobs, Cloud Scheduler, Cloud Build, BigQuery, Terraform e boas práticas de engenharia de dados.
 
 ---
 
 ## 🎯 Objetivo
-
 Criar uma arquitetura de dados completa, simples de replicar e ideal para demonstrações profissionais, entrevistas, portfólio e estudos. A solução implementa:
-
 - Data Lake (Cloud Storage)
 - Data Warehouse (BigQuery)
 - ETL serverless (Cloud Run Jobs)
 - Agendamento automático (Cloud Scheduler)
-- CI/CD (Cloud Build)
+- CI/CD (Cloud Build + GitHub Actions)
 - Infraestrutura como código (Terraform)
 - Documentação visual completa
 
 ---
 
 ## 🏗️ Arquitetura
-
 A arquitetura segue o padrão Medallion:
-
-- **Raw** → dados brutos
-- **Staged** → dados limpos e padronizados
-- **Curated** → dados prontos para consumo analítico
+- Raw → dados brutos
+- Staged → dados limpos
+- Curated → dados prontos para análise
 
 ### Componentes principais
-
-- **Cloud Storage** — Buckets organizados por camadas (raw, staged, curated).
-- **Cloud Run Jobs** — Execução serverless do pipeline ETL.
-- **Cloud Scheduler** — Disparo automático do job.
-- **BigQuery** — Dataset analítico.
-- **Cloud Build** — Pipeline CI/CD que constrói a imagem Docker.
-- **Terraform** — Provisionamento de buckets, dataset e demais recursos.
-- **IAM / Service Accounts** — Controle de acesso e autenticação.
-- **Cloud Logging & Monitoring** — Observabilidade completa.
+- Cloud Storage
+- Cloud Run Jobs
+- Cloud Scheduler
+- BigQuery
+- Artifact Registry
+- Cloud Build
+- Terraform
+- IAM / Service Accounts
+- Cloud Logging & Monitoring
 
 ---
 
 ## 📐 Diagrama da Arquitetura
-
-O diagrama completo da arquitetura está disponível em `docs/architecture-diagram.png`.
+Disponível em `docs/architecture-diagram.png`.
 
 ```mermaid
 flowchart TD
@@ -65,158 +60,163 @@ flowchart TD
 
 ---
 
-## 📁 Estrutura do Repositório
+# 🧱 Infraestrutura Necessária no GCP
+Documentação completa para replicar o ambiente.
 
+## 1. APIs obrigatórias
 ```
-data-architecture-demo/
-│
-├── infra/
-│   ├── terraform/          # Infraestrutura como código
-│   └── cloudbuild.yaml     # Pipeline CI/CD
-│
-├── src/
-│   ├── ingestion/          # Pipelines de ingestão
-│   ├── transform/          # Transformações
-│   └── load/               # Carga para GCS e BigQuery
-│
-├── notebooks/              # Exploração e protótipos
-│
-├── docs/
-│   ├── architecture.md     # Documentação detalhada
-│   ├── architecture-diagram.png
-│   ├── diagram.mmd         # Diagrama Mermaid
-│   └── decisions.md        # ADRs (Architecture Decision Records)
-│
-├── tests/                  # Testes unitários
-│
-├── requirements.txt
-├── .gitignore
-└── README.md
+gcloud services enable \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  cloudscheduler.googleapis.com \
+  storage.googleapis.com \
+  bigquery.googleapis.com
+```
+
+## 2. Service Account para CI/CD
+```
+gcloud iam service-accounts create github-deploy \
+  --display-name="GitHub Deploy Service Account"
+```
+
+Nome final:
+```
+github-deploy@<PROJECT_ID>.iam.gserviceaccount.com
+```
+
+## 3. Permissões necessárias
+| Role | Motivo |
+|------|--------|
+| roles/run.admin | Deploy do Cloud Run Job |
+| roles/artifactregistry.writer | Push da imagem Docker |
+| roles/cloudbuild.builds.editor | Execução do Cloud Build |
+| roles/storage.admin | Acesso ao Data Lake |
+| roles/serviceusage.serviceUsageConsumer | Uso das APIs |
+
+Comando:
+```
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+  --member="serviceAccount:github-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
+  --role="roles/run.admin"
+```
+*(repita para cada role)*
+
+---
+
+## 4. Buckets do Data Lake
+```
+gsutil mb -l southamerica-east1 gs://<PROJECT_ID>-raw
+gsutil mb -l southamerica-east1 gs://<PROJECT_ID>-staged
+gsutil mb -l southamerica-east1 gs://<PROJECT_ID>-curated
+```
+
+Estrutura:
+```
+gs://<PROJECT_ID>-raw/raw/
 ```
 
 ---
 
-## 🚀 Execução Local
+## 5. Artifact Registry
+```
+gcloud artifacts repositories create data-architecture-demo \
+  --repository-format=docker \
+  --location=southamerica-east1
+```
 
-### 1. Criar ambiente virtual
+---
 
-```bash
-/opt/homebrew/opt/python@3.14/bin/python3 -m venv .venv
+## 6. Cloud Run Job
+```
+gcloud run jobs deploy data-etl-job \
+  --image="southamerica-east1-docker.pkg.dev/<PROJECT_ID>/data-architecture-demo/data-etl:latest" \
+  --region="southamerica-east1" \
+  --max-retries=0 \
+  --command=python \
+  --args=src/main.py \
+  --set-env-vars="ENVIRONMENT=production,API_URL=https://jsonplaceholder.typicode.com/posts,TIMEOUT=30,OUTPUT_DIR=/tmp,GCS_BUCKET=<PROJECT_ID>-raw,GCS_PREFIX=raw"
+```
+
+---
+
+## 7. Cloud Scheduler
+```
+gcloud scheduler jobs create http data-etl-schedule \
+  --schedule="0 3 * * *" \
+  --uri="https://southamerica-east1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/<PROJECT_ID>/jobs/data-etl-job:run" \
+  --http-method=POST \
+  --oauth-service-account-email=github-deploy@<PROJECT_ID>.iam.gserviceaccount.com
+```
+
+---
+
+## 8. GitHub Actions — Secrets
+| Secret | Valor |
+|--------|-------|
+| GCP_SA_KEY | JSON da service account |
+| GCP_PROJECT_ID | ID do projeto |
+| GCP_REGION | southamerica-east1 |
+
+---
+
+## 9. Observações sobre VPC-SC
+- Cloud Build roda fora do perímetro
+- Não usar `--gcs-log-dir`
+- Logs ficam no bucket padrão `_cloudbuild`
+- Streaming no GitHub pode não funcionar
+
+---
+
+# 🚀 Execução Local
+```
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 2. Autenticação no GCP
-
-```bash
-gcloud auth application-default login
-gcloud config set project data-architecture-demo-001
-```
-
-### 3. Executar o ETL
-
-```bash
 python src/main.py
 ```
 
 ---
 
-## 🚀 Deploy em Produção
-
-### 1. Construir imagem Docker
-
-```bash
+# 🚀 Deploy Manual
+```
 gcloud builds submit --tag gcr.io/$PROJECT_ID/data-etl
-```
-
-### 2. Criar Cloud Run Job
-
-```bash
-gcloud run jobs create etl-job \
-  --image gcr.io/$PROJECT_ID/data-etl \
-  --region southamerica-east1 \
-  --service-account 26366089084-compute@developer.gserviceaccount.com
-```
-
-### 3. Executar manualmente
-
-```bash
-gcloud run jobs execute etl-job --region southamerica-east1
-```
-
-### 4. Agendar execução diária
-
-```bash
-gcloud scheduler jobs create http etl-job-schedule \
-  --schedule="0 3 * * *" \
-  --uri="https://southamerica-east1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/etl-job:run" \
-  --http-method=POST \
-  --oauth-service-account-email=26366089084-compute@developer.gserviceaccount.com
+gcloud run jobs create etl-job --image gcr.io/$PROJECT_ID/data-etl --region southamerica-east1
 ```
 
 ---
 
-## 📊 Monitoramento
-
-- Logs disponíveis no **Cloud Logging**
-- Métricas no **Cloud Monitoring**
-- Alertas configuráveis via políticas de monitoramento
+# 📊 Monitoramento
+- Cloud Logging
+- Cloud Monitoring
+- Alertas opcionais
 
 ---
 
-## 🔐 Segurança e Governança
-
-- Versionamento de objetos habilitado nos buckets
-- Soft delete com retenção de 7 dias
-- IAM granular via Service Accounts
+# 🔐 Segurança
+- Versionamento de objetos
+- IAM granular
 - Auditoria via Cloud Audit Logs
 
 ---
 
-## 🧪 Testes
-
-```bash
+# 🧪 Testes
+```
 pytest tests/
 ```
 
 ---
 
-## 🤖 Como o Copilot ajudou neste projeto
-
-O Copilot contribuiu em:
-
-### Arquitetura
-- Estrutura Medallion
-- Organização dos componentes GCP
-- Criação do diagrama visual
-
-### Infraestrutura
-- Geração dos arquivos Terraform
-- Configuração de permissões IAM
-- Pipeline Cloud Build
-
-### Código
-- Módulos de ingestão, transformação e carga
-- Boas práticas em Python
-- Testes unitários
-
-### Documentação
-- Estrutura completa do README
-- ADRs
-- Documentação visual
-
-### GitHub
-- Estrutura profissional do repositório
-- Organização das pastas
-- Orientação para commits
+# 🤖 Como o Copilot ajudou
+- Arquitetura
+- Infraestrutura
+- Código
+- Documentação
+- GitHub Actions
 
 ---
 
-## 📬 Contato
-
-Mario Jorge de Abreu Busch (mariojorgebusch@icloud.com)
-
-Rio de Janeiro – Brasil
-
+# 📬 Contato
+Mario Jorge de Abreu Busch — Rio de Janeiro, Brasil
 GitHub: https://github.com/mariojbusch
 
